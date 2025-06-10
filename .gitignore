@@ -5,6 +5,10 @@ backend/node_modules/
 build/
 dist/
 
+# Ignore uploaded images
+/uploads
+
+
 # Mac OS junk
 .DS_Store
 
