@@ -1,6 +1,5 @@
 // src/components/ContactCard.jsx
-import React, { useState } from 'react';
-
+import React, { useState, useEffect } from 'react';
 
 function highlightText(text, highlight) {
     if (!highlight) return text;
@@ -13,22 +12,28 @@ function highlightText(text, highlight) {
 }
 
 function getAvatarUrl(contact) {
-    // Prefer name, fallback to email
     const seed = contact.name || contact.email || 'User';
-    // DiceBear Initials API
     return `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc`;
-
 }
 
 export default function ContactCard({ contact, onDelete, onUpdate, search }) {
-    const [isEditing, setIsEditing] = React.useState(false);
+    const [isEditing, setIsEditing] = useState(false);
     const [form, setForm] = useState({ ...contact });
-    const [profilePicPreview, setProfilePicPreview] = useState(form.profilePic ? `http://localhost:3001/uploads/${contact.profilePic}` : '');
+    const [profilePicPreview, setProfilePicPreview] = useState(
+        contact.profilePic ? `http://localhost:3001/uploads/${contact.profilePic}` : ''
+    );
+
+    // ✅ Sync form and preview with updated contact data
+    useEffect(() => {
+        setForm({ ...contact });
+        setProfilePicPreview(contact.profilePic ? `http://localhost:3001/uploads/${contact.profilePic}` : '');
+    }, [contact]);
 
     const handleEditClick = () => setIsEditing(true);
+
     const handleCancel = () => {
         setForm({ ...contact });
-        setProfilePicPreview(form.profilePic ? `http://localhost:3001/uploads/${contact.profilePic}` : '');
+        setProfilePicPreview(contact.profilePic ? `http://localhost:3001/uploads/${contact.profilePic}` : '');
         setIsEditing(false);
     };
 
@@ -42,13 +47,12 @@ export default function ContactCard({ contact, onDelete, onUpdate, search }) {
             onDelete(contact.id);
         }
     };
+    console.log("💾 contact.profilePic =", contact.profilePic);
 
     return (
         <div className="border p-4 rounded-2xl shadow-sm hover:shadow-md transition bg-white w-full mb-4">
             {isEditing ? (
-
                 <div className="flex flex-col sm:flex-row gap-4 w-full">
-                    {/* Image preview and file upload */}
                     <div className="flex flex-col items-center justify-center w-full sm:w-auto">
                         <label className="block mb-1 font-semibold">Profile Picture</label>
                         <input
@@ -78,29 +82,25 @@ export default function ContactCard({ contact, onDelete, onUpdate, search }) {
                             }}
                             className="w-full"
                         />
-
                         <div className="mt-2 flex flex-col items-center">
-                            {profilePicPreview || form.profilePic ? (
+                            {profilePicPreview ? (
                                 <>
                                     <img
-                                        src={profilePicPreview || `http://localhost:3001/uploads/${form.profilePic}`}
+                                        src={profilePicPreview}
                                         alt="Profile Preview"
                                         className="w-20 h-20 rounded-full border shadow"
                                         style={{ objectFit: 'cover' }}
                                     />
-                                    {/* Remove photo button */}
-                                    {(form.profilePic || profilePicPreview) && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setForm({ ...form, profilePic: '' });
-                                                setProfilePicPreview('');
-                                            }}
-                                            className="mt-1 text-xs text-red-600 underline"
-                                        >
-                                            Remove Photo
-                                        </button>
-                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setForm({ ...form, profilePic: '' });
+                                            setProfilePicPreview('');
+                                        }}
+                                        className="mt-1 text-xs text-red-600 underline"
+                                    >
+                                        Remove Photo
+                                    </button>
                                 </>
                             ) : (
                                 <span className="block text-xs text-gray-400">No picture selected</span>
@@ -108,7 +108,6 @@ export default function ContactCard({ contact, onDelete, onUpdate, search }) {
                         </div>
                     </div>
 
-                    {/* Inputs */}
                     <div className="flex-1 space-y-2">
                         <input
                             className="w-full border p-2 rounded"
@@ -138,26 +137,36 @@ export default function ContactCard({ contact, onDelete, onUpdate, search }) {
                         <div className="flex flex-col sm:flex-row gap-2 mt-3">
                             <button
                                 onClick={handleSave}
-                                className="bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 transition">💾 Save</button>
+                                className="bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 transition"
+                            >
+                                💾 Save
+                            </button>
                             <button
                                 onClick={handleCancel}
-                                className="bg-gray-400 text-white px-3 py-2 rounded hover:bg-gray-500 transition">Cancel</button>
+                                className="bg-gray-400 text-white px-3 py-2 rounded hover:bg-gray-500 transition"
+                            >
+                                Cancel
+                            </button>
                         </div>
-                    </div >
+                    </div>
                 </div>
             ) : (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full">
-                    {/* Avatar and Info */}
                     <div className="flex items-center gap-4 min-w-0 w-full sm:w-auto">
                         <img
                             src={
-                                contact.profilePic
+                                form.profilePic
                                     ? `http://localhost:3001/uploads/${contact.profilePic}`
                                     : getAvatarUrl(contact)
                             }
+                            onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = getAvatarUrl(contact);
+                            }}
                             alt={contact.name}
                             className="w-16 h-16 sm:w-14 sm:h-14 rounded-full border object-cover"
                         />
+
                         <div className="flex-1 min-w-0">
                             <h2 className="font-semibold text-base sm:text-lg break-words">
                                 {highlightText(contact.name, search)}
@@ -178,7 +187,6 @@ export default function ContactCard({ contact, onDelete, onUpdate, search }) {
                             </div>
                         </div>
                     </div>
-                    {/* Actions */}
                     <div className="flex flex-row flex-wrap gap-2 items-center mt-2 sm:mt-0 sm:flex-col min-w-0">
                         <button
                             className={contact.favorite ? "text-yellow-400 text-2xl hover:scale-125" : "text-gray-400 text-2xl hover:scale-125"}
@@ -191,15 +199,22 @@ export default function ContactCard({ contact, onDelete, onUpdate, search }) {
                         <button
                             onClick={handleEditClick}
                             className="bg-yellow-500 text-white px-3 py-1 rounded hover:bg-yellow-600 transition"
-                        >✏️ Edit</button>
+                        >
+                            ✏️ Edit
+                        </button>
                         <button
                             onClick={handleDelete}
                             className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-700 transition"
-                        >🗑️</button>
+                        >
+                            🗑️
+                        </button>
+
                     </div>
                 </div>
             )}
+
         </div>
 
-    )
-};
+    );
+
+}
