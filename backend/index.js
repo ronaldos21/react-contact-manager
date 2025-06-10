@@ -1,165 +1,148 @@
+// index.js (for Postgres/Neon)
 const express = require('express');
-const mysql = require('mysql2');
 const cors = require('cors');
-
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { parse } = require('csv-parse');
+const { Parser } = require('json2csv');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-//multer functionality
-const multer = require('multer');
-const path = require('path');
-
-const upload = multer({ dest: 'uploads/' });
+// ✅ Serve uploaded images
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-
-
-// Connect to MySQL
-const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'Isimbana21', // Change as needed
-    database: 'contact_db'
-});
-
-// Connect and verify
-db.connect((err) => {
-    if (err) {
-        console.error('❌ MySQL connection failed:', err);
-        process.exit(1);
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        cb(null, 'uploads/');
+    },
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        const uniqueName = `${Date.now()}-${Math.round(Math.random() * 1E9)}${ext}`;
+        cb(null, uniqueName);
     }
-    console.log('✅ MySQL connected successfully!');
+});
+const upload = multer({ storage });
+
+
+// Connect to PostgreSQL (Neon)
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_PrZp4lxG9WNI@ep-wandering-grass-a4khr7ul-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require',
+    ssl: { rejectUnauthorized: false }
 });
 
-// GET all contacts (with favorite)
-app.get('/contacts', (req, res) => {
-    db.query('SELECT * FROM contacts', (err, results) => {
-        if (err) return res.status(500).json(err);
-        // Convert MySQL 0/1 to boolean for frontend
-        const contacts = results.map(c => ({ ...c, favorite: Boolean(c.favorite) }));
+// GET all contacts
+app.get('/contacts', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM contacts');
+        const contacts = result.rows.map(c => ({
+            id: c.id,
+            name: c.name,
+            email: c.email,
+            phone: c.phone,
+            favorite: !!c.favorite,
+            tags: c.tags || '',
+            profilePic: c.profilepic || ''  // ✅ Ensure profilePic is included
+        }));
         res.json(contacts);
-    });
+    } catch (err) {
+        console.error('❌ Error fetching contacts:', err);
+        res.status(500).json(err);
+    }
 });
 
 // POST add a new contact
-app.post('/contacts', (req, res) => {
+app.post('/contacts', async (req, res) => {
     const { name, email, phone, favorite, tags, profilePic } = req.body;
     if (!name || !email || !phone) {
         return res.status(400).json({ error: 'All fields are required' });
     }
     const favValue = favorite ? 1 : 0;
-
-    db.query(
-        'INSERT INTO contacts (name, email, phone, favorite, tags, profilePic) VALUES (?, ?, ?, ?, ?, ?)',
-        [name, email, phone, favValue, tags || '', profilePic || ''],
-        (err, results) => {
-            if (err) {
-                console.error('❌ MySQL insert error:', err);
-                return res.status(500).json(err);
-            }
-            res.status(201).json({
-                id: results.insertId,
-                name,
-                email,
-                phone,
-                favorite: !!favValue,
-                tags: tags || '',
-                profilePic: profilePic || ''
-            });
-        }
-    );
+    try {
+        const result = await pool.query(
+            'INSERT INTO contacts (name, email, phone, favorite, tags, profilePic) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+            [name, email, phone, favValue, tags || '', profilePic || '']
+        );
+        res.status(201).json({
+            id: result.rows[0].id,
+            name,
+            email,
+            phone,
+            favorite: !!favValue,
+            tags: tags || '',
+            profilePic: profilePic || ''
+        });
+    } catch (err) {
+        console.error('❌ Postgres insert error:', err);
+        res.status(500).json(err);
+    }
 });
 
-//POST to upload images and return file URL or filename
+// POST to upload images and return file URL or filename
 app.post('/upload', upload.single('profilePic'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
-    // Optionally rename file or process as needed
     res.json({ filename: req.file.filename });
 });
 
-
-
-
-
-
-
 // PUT update a contact
-app.put('/contacts/:id', (req, res) => {
+app.put('/contacts/:id', async (req, res) => {
     const contactId = req.params.id;
     const { name, email, phone, favorite, tags, profilePic } = req.body;
     const favValue = favorite ? 1 : 0;
-
-    db.query(
-        'UPDATE contacts SET name = ?, email = ?, phone = ?, favorite = ?, tags = ?, profilePic = ? WHERE id = ?',
-        [name, email, phone, favValue, tags || '', profilePic || '', contactId],
-
-
-        (err, results) => {
-            if (err) {
-                console.error('❌ Error updating contact:', err);
-                return res.status(500).json(err);
-            }
-            res.json({
-                id: contactId,
-                name,
-                email,
-                phone,
-                favorite: !!favValue,
-                tags: tags || '',
-                profilePic: profilePic || ''
-            });
-        }
-    );
+    try {
+        await pool.query(
+            'UPDATE contacts SET name = $1, email = $2, phone = $3, favorite = $4, tags = $5, profilePic = $6 WHERE id = $7',
+            [name, email, phone, favValue, tags || '', profilePic || '', contactId]
+        );
+        res.json({
+            id: contactId,
+            name,
+            email,
+            phone,
+            favorite: !!favValue,
+            tags: tags || '',
+            profilePic: profilePic || ''
+        });
+    } catch (err) {
+        console.error('❌ Error updating contact:', err);
+        res.status(500).json(err);
+    }
 });
 
 // DELETE a contact
-app.delete('/contacts/:id', (req, res) => {
+app.delete('/contacts/:id', async (req, res) => {
     const contactId = req.params.id;
-
-    db.query('DELETE FROM contacts WHERE id = ?', [contactId], (err, results) => {
-        if (err) {
-            console.error('❌ Error deleting contact:', err);
-            return res.status(500).json(err);
-        }
+    try {
+        await pool.query('DELETE FROM contacts WHERE id = $1', [contactId]);
         res.sendStatus(204);
-    });
+    } catch (err) {
+        console.error('❌ Error deleting contact:', err);
+        res.status(500).json(err);
+    }
 });
 
-
-const { Parser } = require('json2csv');
-
-//Export contacts to CSV
-app.get('/contacts/export', (req, res) => {
-    db.query('SELECT * FROM contacts', (err, results) => {
-        if (err) return res.status(500).json(err);
-
-        //Select fields to include in CSV
+// Export contacts to CSV
+app.get('/contacts/export', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM contacts');
         const fields = ['id', 'name', 'email', 'phone', 'favorite', 'tags', 'profilePic'];
-        const options = { fields };
-
-        try {
-            const parser = new Parser(options);
-            const csv = parser.parse(results);
-            res.header('Content-Type', 'text/csv');
-            res.attachment('contacts.csv');
-            return res.send(csv);
-        } catch (err) {
-            return res.status(500).json({ error: err.message });
-        }
-
-
-    });
-
+        const parser = new Parser({ fields });
+        const csv = parser.parse(result.rows);
+        res.header('Content-Type', 'text/csv');
+        res.attachment('contacts.csv');
+        return res.send(csv);
+    } catch (err) {
+        return res.status(500).json({ error: err.message });
+    }
 });
 
-const fs = require('fs');
-const { parse } = require('csv-parse'); // Add at top
-
+// Import contacts from CSV
 app.post('/contacts/import', upload.single('csv'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
@@ -170,7 +153,6 @@ app.post('/contacts/import', upload.single('csv'), (req, res) => {
     fs.createReadStream(filePath)
         .pipe(parse({ columns: true, trim: true }))
         .on('data', (row) => {
-            // Map CSV columns to your contact schema
             contacts.push({
                 name: row.name,
                 email: row.email,
@@ -180,39 +162,30 @@ app.post('/contacts/import', upload.single('csv'), (req, res) => {
                 profilePic: row.profilePic || ''
             });
         })
-        .on('end', () => {
-            // Bulk insert (one by one for simplicity)
-            let completed = 0;
+        .on('end', async () => {
             let errors = [];
-            contacts.forEach(contact => {
-                db.query(
-                    'INSERT INTO contacts (name, email, phone, favorite, tags, profilePic) VALUES (?, ?, ?, ?, ?, ?)',
-                    [contact.name, contact.email, contact.phone, contact.favorite, contact.tags, contact.profilePic],
-                    (err, results) => {
-                        completed++;
-                        if (err) {
-                            errors.push({ contact, error: err.message });
-                        }
-                        if (completed === contacts.length) {
-                            // Clean up temp file
-                            fs.unlinkSync(filePath);
-                            if (errors.length > 0) {
-                                res.status(400).json({ message: 'Some contacts could not be imported.', errors });
-                            } else {
-                                res.json({ message: 'Contacts imported successfully', count: contacts.length });
-                            }
-                        }
-                    }
-                );
-            });
+            for (const contact of contacts) {
+                try {
+                    await pool.query(
+                        'INSERT INTO contacts (name, email, phone, favorite, tags, profilePic) VALUES ($1, $2, $3, $4, $5, $6)',
+                        [contact.name, contact.email, contact.phone, contact.favorite, contact.tags, contact.profilePic]
+                    );
+                } catch (err) {
+                    errors.push({ contact, error: err.message });
+                }
+            }
+            fs.unlinkSync(filePath);
+            if (errors.length > 0) {
+                res.status(400).json({ message: 'Some contacts could not be imported.', errors });
+            } else {
+                res.json({ message: 'Contacts imported successfully', count: contacts.length });
+            }
         })
         .on('error', (err) => {
             fs.unlinkSync(filePath);
             res.status(500).json({ error: 'Failed to parse CSV: ' + err.message });
         });
 });
-
-
 
 app.listen(3001, () => {
     console.log('✅ Backend running on http://localhost:3001');
